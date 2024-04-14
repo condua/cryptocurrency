@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Cryptocurrency Data</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #dddddd;
+            text-align: left;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 1% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        canvas {
+            display: block;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Cryptocurrency Data</h2>
+    <input type="text" id="searchInput" onkeyup="searchByName()" placeholder="Search by name...">
+    <button onclick="sortAscending()">Sort by Price (Low to High)</button>
+    <button onclick="sortDescending()">Sort by Price (High to Low)</button>
+    <table id="crypto-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Price</th>
+            </tr>
+        </thead>
+        <tbody id="crypto-table-body">
+            <!-- Data will be dynamically inserted here -->
+        </tbody>
+    </table>
+
+    <!-- Modal -->
+    <div id="myModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <canvas id="modal-chart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let symbolsData = []; // Store original data for sorting and searching
+        let chartData = []; // Store data for chart
+        let selectedSymbol = null; // Store the selected symbol
+
+        // Function to handle WebSocket connection
+        function connectToWebSocket(symbols) {
+            const streams = symbols.map(symbol => `${symbol.toLowerCase()}usdt@trade`).join('/');
+            const socket = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
+
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const symbol = data.stream.split('@')[0];
+                updateTable(data.data, symbol);
+                if (selectedSymbol === symbol) {
+                    updateChartData(data.data);
+                }
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error: ', error);
+            };
+        }
+
+        // Function to update the table with new data
+        function updateTable(data, symbol) {
+            const tableBody = document.getElementById('crypto-table-body');
+            const existingRow = tableBody.querySelector(`tr[data-symbol="${symbol}"]`);
+        
+            if (existingRow) {
+                existingRow.innerHTML = `
+                    <td><a href="#" onclick="selectSymbol('${symbol}')">${data.s}</a></td>
+                    <td>${data.p}</td>
+                `;
+            } else {
+                const newRow = `
+                    <tr data-symbol="${symbol}">
+                        <td><a href="#" onclick="selectSymbol('${symbol}')">${data.s}</a></td>
+                        <td>${data.p}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += newRow;
+            }
+
+            // Update symbolsData array
+            const index = symbolsData.findIndex(item => item.symbol === symbol);
+            if (index !== -1) {
+                symbolsData[index].price = data.p;
+            } else {
+                symbolsData.push({ symbol: symbol, price: data.p });
+            }
+        }
+
+        // Update chart data
+        function updateChartData(data) {
+            const time = new Date().toLocaleTimeString();
+            const price = parseFloat(data.p);
+
+            if (chartData.length >= 100) {
+                chartData.shift(); // Remove the oldest data point
+            }
+
+            chartData.push({ time: time, price: price });
+            updateChart();
+        }
+
+        // Function to update the chart
+        function updateChart() {
+            const ctx = document.getElementById('modal-chart').getContext('2d');
+
+            if (window.chart !== undefined) {
+                window.chart.destroy(); // Destroy previous chart instance
+            }
+
+            window.chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.map(item => item.time),
+                    datasets: [{
+                        label: 'Price',
+                        data: chartData.map(item => item.price),
+                        borderColor: 'rgb(75, 192, 192)',
+                        borderWidth: 1,
+                        fill: false
+                    }]
+                },
+                options: {
+                    scales: {
+                        yAxes: [{
+                            ticks: {
+                                beginAtZero: false
+                            }
+                        }]
+                    }
+                }
+            });
+        }
+
+        // Search by name function
+        function searchByName() {
+            const input = document.getElementById('searchInput').value.toUpperCase();
+            const filteredData = symbolsData.filter(item => item.symbol.toUpperCase().includes(input));
+            populateTable(filteredData);
+        }
+
+        // Sort by price (ascending)
+        function sortAscending() {
+            const sortedData = symbolsData.slice().sort((a, b) => a.price - b.price);
+            populateTable(sortedData);
+        }
+
+        // Sort by price (descending)
+        function sortDescending() {
+            const sortedData = symbolsData.slice().sort((a, b) => b.price - a.price);
+            populateTable(sortedData);
+        }
+
+        // Function to populate the table with data
+        function populateTable(data) {
+            const tableBody = document.getElementById('crypto-table-body');
+            tableBody.innerHTML = ''; // Clear table body
+            data.forEach(item => {
+                tableBody.innerHTML += `
+                    <tr data-symbol="${item.symbol}">
+                        <td><a href="#" onclick="selectSymbol('${item.symbol}')">${item.symbol}</a></td>
+                        <td>${item.price}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // Function to select symbol and update chart
+        function selectSymbol(symbol) {
+            selectedSymbol = symbol;
+            chartData = []; // Clear previous chart data
+
+            const filteredData = chartData.filter(item => item.symbol === symbol);
+            openModal(filteredData);
+        }
+
+        // Function to open the modal
+        function openModal(data) {
+            const modal = document.getElementById('myModal');
+            modal.style.display = 'block';
+
+            updateChart(data);
+        }
+
+        // Function to close the modal
+        function closeModal() {
+            const modal = document.getElementById('myModal');
+            modal.style.display = 'none';
+        }
+
+        // Call connectToWebSocket function with symbols list when the page loads
+        window.onload = function() {
+            const symbols = ['BTC', 'ETH', 'XRP', 'BCH', 'LTC', 'ADA', 'DOT', 'BNB', 'LINK', 'XLM', 'USDT', 'DOGE', 'EOS', 'TRX', 'XMR', 'ATOM', 'VET', 'SOL', 'DASH', 'FIL']; // Add more symbols as needed
+            connectToWebSocket(symbols);
+            
+        };
+    </script>
+</body>
+</html>
